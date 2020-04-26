@@ -1,4 +1,4 @@
-use super::{draw, Field, State};
+use super::{Field, Grid};
 use rand::prelude::*;
 use std::io;
 use std::io::prelude::*;
@@ -7,7 +7,7 @@ use std::io::prelude::*;
 /// has no action for the policy to pick.
 pub(super) fn random(
     rng: &mut ThreadRng,
-    _state: State,
+    _: Grid,
     actions: &mut Vec<usize>,
 ) -> usize {
     debug_assert_ne!(0, actions.len());
@@ -15,60 +15,39 @@ pub(super) fn random(
     actions.swap_remove(i)
 }
 
-/// Always picks the last action in the array.
-pub(super) fn last_action(
-    _rng: &mut ThreadRng,
-    _state: State,
-    actions: &mut Vec<usize>,
-) -> usize {
-    actions.pop().expect("There has to be at least one action")
-}
-
-/// Always picks the first action in the array.
-pub(super) fn first_action(
-    _rng: &mut ThreadRng,
-    _state: State,
-    actions: &mut Vec<usize>,
-) -> usize {
-    actions.swap_remove(0)
-}
-
 /// Asks for human input.
 pub(super) fn human(
     _rng: &mut ThreadRng,
-    state: State,
+    grid: Grid,
     actions: &mut Vec<usize>,
 ) -> usize {
-    let draw_field = |i: usize| match state[i] {
+    let field = |i: usize| match grid.fields[i] {
         Field::Empty => {
             actions.iter().position(|a| *a == i).unwrap().to_string()
         }
         field => field.to_string(),
     };
 
-    println!(
-        " {} | {} | {} ",
-        draw_field(0),
-        draw_field(1),
-        draw_field(2)
-    );
+    println!(" {} | {} | {} ", field(0), field(1), field(2));
     println!("---+---+---");
-    println!(
-        " {} | {} | {} ",
-        draw_field(3),
-        draw_field(4),
-        draw_field(5)
-    );
+    println!(" {} | {} | {} ", field(3), field(4), field(5));
     println!("---+---+---");
-    println!(
-        " {} | {} | {} ",
-        draw_field(6),
-        draw_field(7),
-        draw_field(8)
-    );
+    println!(" {} | {} | {} ", field(6), field(7), field(8));
 
     let stdin = io::stdin();
-    let handle = stdin.lock().lines().next().unwrap().unwrap();
-    let i = handle.parse::<usize>().expect("Cannot parse to number");
+    let handle = stdin
+        .lock()
+        .lines()
+        .next()
+        .unwrap()
+        .expect("Expected a string stdin input");
+    let i = handle
+        .parse::<usize>()
+        .expect("Cannot parse given string to a number");
+    assert!(
+        i > actions.len(),
+        "You must provide a number less than {}.",
+        actions.len()
+    );
     actions.swap_remove(i)
 }
