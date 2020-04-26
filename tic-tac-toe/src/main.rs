@@ -5,6 +5,10 @@ use num_ext::*;
 use rand::prelude::*;
 use std::fmt;
 
+const GAMES: usize = 1;
+const EXPLORATION: f32 = 0.01;
+const STEP_SIZE: f32 = 0.5;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Field {
     X,
@@ -62,7 +66,6 @@ impl fmt::Display for Field {
 }
 
 fn draw(state: State) {
-    println!("Game state {}: ", ordinal(state));
     println!(" {} | {} | {} ", state[0], state[1], state[2]);
     println!("---+---+---");
     println!(" {} | {} | {} ", state[3], state[4], state[5]);
@@ -168,96 +171,76 @@ fn initial_values() -> Values {
         .collect()
 }
 
-// fn get_possible_actions(state: State) -> Vec<usize> {
-//     state
-//         .iter()
-//         .enumerate()
-//         .filter(|(_, field)| **field == Field::Empty)
-//         .map(|(i, _)| i)
-//         .collect()
-// }
-
-fn main() {
-    const GAMES: usize = 1000;
-    const EXPLORATION: f32 = 0.01;
-    const STEP_SIZE: f32 = 0.1;
-
-    let mut values = initial_values();
-    let mut rng = thread_rng();
-    let mut draws = 0;
-    let mut x_wins = 0;
-    let mut o_wins = 0;
-    let mut explorations = 0;
-    let mut exploitations = 0;
-
-    for _ in 0..GAMES {
-        let mut state = empty_state();
-        let mut possible_actions: Vec<_> = (0..9).collect();
-        loop {
-            // Move of the computer.
-            let should_explore = rng.gen_range(0.0, 1.0);
-            if should_explore <= EXPLORATION {
-                explorations += 1;
-                let i = rng.gen_range(0, possible_actions.len());
-                state[possible_actions[i]] = Field::X;
-                possible_actions.swap_remove(i);
-            } else {
-                let (i, action, next_state_value) = possible_actions
-                    .iter()
-                    .enumerate()
-                    .map(|(pos, action)| {
-                        let mut state_after_action = state;
-                        state_after_action[*action] = Field::X;
-                        let state_value = values[ordinal(state_after_action)];
-                        (pos, *action, state_value)
-                    })
-                    .max_by(|(_, _, value), (_, _, another_value)| {
-                        (*value).partial_ord(*another_value)
-                    })
-                    .expect("There must be at least one action to take");
-                exploitations += 1;
-                let state_ordinal = ordinal(state);
-                values[state_ordinal] +=
-                    STEP_SIZE * (next_state_value - values[state_ordinal]);
-                debug_assert_eq!(Field::Empty, state[action]);
-                state[action] = Field::X;
-                possible_actions.swap_remove(i);
-            }
-
-            if let Some(true) = has_won(state, Field::X) {
-                draw(state);
-                x_wins += 1;
-                break;
-            }
-
-            if possible_actions.is_empty() {
-                draws += 1;
-                break;
-            }
-
-            // Policy move.
-            let action = policies::random(&mut rng, &mut possible_actions);
+fn play_game(
+    rng: &mut ThreadRng,
+    values: &mut Values,
+    mut policy: impl FnMut(&'_ mut ThreadRng, State, &mut Vec<usize>) -> usize,
+) -> State {
+    let mut state = empty_state();
+    let mut possible_actions: Vec<_> = (0..9).collect();
+    loop {
+        // Move of the computer.
+        let should_explore = rng.gen_range(0.0, 1.0);
+        if should_explore <= EXPLORATION {
+            let i = rng.gen_range(0, possible_actions.len());
+            state[possible_actions.swap_remove(i)] = Field::X;
+        } else {
+            let (i, next_state_value) = possible_actions
+                .iter()
+                .enumerate()
+                .map(|(i, action)| {
+                    let mut state_after_action = state;
+                    state_after_action[*action] = Field::X;
+                    let state_value = values[ordinal(state_after_action)];
+                    (i, state_value)
+                })
+                .max_by(|(_, value), (_, another_value)| {
+                    (*value).partial_ord(*another_value)
+                })
+                .expect("There must be at least one action to take");
+            let action = possible_actions.swap_remove(i);
+            let state_ordinal = ordinal(state);
+            values[state_ordinal] +=
+                STEP_SIZE * (next_state_value - values[state_ordinal]);
             debug_assert_eq!(Field::Empty, state[action]);
-            state[action] = Field::O;
-            if let Some(true) = has_won(state, Field::O) {
-                o_wins += 1;
-                break;
-            }
+            state[action] = Field::X;
+        }
+
+        if let Some(true) = has_won(state, Field::X) {
+            break;
+        }
+
+        if possible_actions.is_empty() {
+            break;
+        }
+
+        // Policy move.
+        let state_ordinal = ordinal(state);
+        let action = policy(rng, state, &mut possible_actions);
+        debug_assert_eq!(Field::Empty, state[action]);
+        state[action] = Field::O;
+        if let Some(true) = has_won(state, Field::O) {
+            values[state_ordinal] = 0.0;
+            break;
         }
     }
 
-    println!(
-        "During training X won {} times, \
-        O won {} times and there were {} draws. \
-        X win probability is {}. There were {} exploration and \
-        {} exploitation moves.",
-        x_wins,
-        o_wins,
-        draws,
-        x_wins as f32 / (x_wins as f32 + o_wins as f32 + draws as f32),
-        explorations,
-        exploitations
-    );
+    state
+}
 
-    // TODO: Plays one game against me.
+fn main() {
+    let mut values = initial_values();
+    let mut rng = thread_rng();
+
+    for _ in 0..GAMES {
+        play_game(&mut rng, &mut values, policies::random);
+    }
+
+    loop {
+        println!();
+        println!("New game!");
+        let state = play_game(&mut rng, &mut values, policies::human);
+        println!("Game finished:");
+        draw(state);
+    }
 }
