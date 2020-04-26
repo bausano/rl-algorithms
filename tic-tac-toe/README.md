@@ -11,3 +11,16 @@
     \
     \
     _Sutton Bartol, Reinforcement Learning: Introduction, 2nd edition, p. 11_
+
+This implementation has one value for each one of the 3^9 possible states. It uses temporal difference to update state values.
+
+You can run it with `cargo run --release` and optionally you can provide how many training games should it play against a random policy before playing against a user (e.g. `cargo run --release 5000`).
+
+## Exercises
+> Many tic-tac-toe positions appear different but are really the same because of symmetries. How might we amend the reinforcement learning algorithm described above to take advantage of this? In what ways would this improve it? Now think again. Suppose the opponent did not take advantage of symmetries. In that case, should we? Is it true, then, that symmetrically equivalent positions should necessarily have the same value?
+
+While symmetries would reduce computational complexity, if the opponent does not take advantages, in the example of tic-tac-toe we might fail to pick up some low hanging fruit. An option is to update states of symmetries by only a fraction of what we update the actual played state by. This way we learn from symmetrical positions and leverage symmetries, but at the same time we're aware that we can take advantage of our opponent's ignorance of symmetry.
+
+> Greedy Play Suppose the reinforcement learning player was greedy, that is, it always played the move that brought it to the position that it rated the best. Would it learn to play better, or worse, than a non greedy player? What problems might occur?
+
+We are stuck in a local minima. The actor wouldn't innovate. Solution that is ok to be played against one environment might fail with slight changes in the environment.

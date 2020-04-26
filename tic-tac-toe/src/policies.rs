@@ -45,7 +45,7 @@ pub(super) fn human(
         .parse::<usize>()
         .expect("Cannot parse given string to a number");
     assert!(
-        i > actions.len(),
+        i < actions.len(),
         "You must provide a number less than {}.",
         actions.len()
     );

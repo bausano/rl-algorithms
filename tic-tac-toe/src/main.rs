@@ -3,11 +3,8 @@ mod policies;
 
 use num_ext::*;
 use rand::prelude::*;
+use std::env;
 use std::fmt;
-
-/// How many games should the agent play against a random policy to train its
-/// value vector.
-const TRAINING_GAMES: usize = 1000;
 
 /// Dictates how often an exploration move happens. Exploration move means that
 /// given a list of allowed actions, one is selected at random rather than one
@@ -349,11 +346,20 @@ fn play_game(
 }
 
 fn main() {
-    let mut values = initial_values(Player::X);
     let mut rng = thread_rng();
+    let mut values = initial_values(Player::X);
+
+    // How many games should the agent play against a random policy to train its
+    // value vector.
+    let mut args = env::args();
+    args.next();
+    let training_games =
+        args.next().and_then(|s| s.parse().ok()).unwrap_or(1000);
+
+    println!("Playing {} training games.", training_games);
 
     // Trains the actor against a random policy.
-    for _ in 0..TRAINING_GAMES {
+    for _ in 0..training_games {
         play_game(&mut rng, &mut values, policies::random);
     }
 
