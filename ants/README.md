@@ -32,5 +32,12 @@ between `n in N`. For enemy trail, ant only "senses" whether it exists or not.
 I am hoping this could lead to specializations of ants (i.e. ant #3, #25 and
 #40 are explorers while other are exploiters).
 
+1. Making it more likely to spawn new nutrients in some areas of the environment
+    should make for more interesting play.
+2. Create an environment for each core to learn in parallel.
+3. Allow multiple dynasties in one environment.
+4. Implement a genetic algorithm that competes with the RL one.
+5. Spawning new ants gets more expensive with number of ants.
+
 <!-- Invisible List of References -->
 [david-silver-videolecture-3]: https://youtu.be/Nd1-UUMVfz4?t=1771
