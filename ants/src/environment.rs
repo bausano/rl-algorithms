@@ -38,6 +38,7 @@ pub type DynastyId = u8;
 /// Nutrients are measured as a counter;
 pub type FoodUnit = usize;
 
+#[derive(Debug)]
 pub struct Environment {
     /// The environment is represented by a grid where the outer vector
     /// represents rows and the inner represents cells, i.e the position in the
@@ -49,6 +50,7 @@ pub struct Environment {
     rng: ThreadRng,
 }
 
+#[derive(Clone, Debug)]
 pub struct Dynasty {
     pub id: DynastyId,
     /// Counter for how much food has the dynasty gathered.
@@ -58,7 +60,9 @@ pub struct Dynasty {
     pub ants: usize,
 }
 
-/// An action which an ant can take. In another words: up, right, bottom, left.
+/// An action which an ant can take and current rotation of the ant. In another
+/// words: up, right, bottom, left. Direction is the inverse of ant's last
+/// action. It determines which cells the ant can "sense".
 #[derive(Clone, Copy, Debug)]
 pub enum Direction {
     North,
@@ -66,10 +70,12 @@ pub enum Direction {
     South,
     West,
 }
+
 #[derive(Clone, Copy, Debug)]
 pub struct Ant {
     pub dynasty_id: DynastyId,
     pub carries_food: FoodUnit,
+    pub direction: Direction,
     pub ttl: u16,
 }
 
@@ -101,6 +107,9 @@ impl Environment {
     pub fn new(size: usize, dynasties: u8) -> Self {
         assert!(dynasties > 1);
         assert!(size > dynasties as usize * 5);
+        // An arbitrary restriction to ease up development.
+        // assert!(size % 3 == 0, "Size must be a multiple of 3.");
+
         let mut rng = thread_rng();
         let dynasties: Vec<Dynasty> =
             (0..dynasties).map(Dynasty::new).collect();
@@ -138,20 +147,22 @@ impl Dynasty {
 
 impl Environment {
     pub fn step(&mut self) {
-        for (y, row) in self.cells.iter_mut().enumerate() {
-            for (x, cell) in row.iter_mut().enumerate() {
-                match cell {
+        for y in 0..self.cells.len() {
+            for x in 0..self.cells[y].len() {
+                match &mut self.cells[y][x] {
                     Cell::Grass => {
                         let should_spawn_food =
                             self.rng.roll_dice(FOOD_SPAWN_P);
                         if should_spawn_food {
                             // TODO: Make this a distribution.
-                            *cell = Cell::Food(BASE_FOOD_AMOUNT);
+                            // TODO: Some parts of the environment are more
+                            // fruitful.
+                            self.cells[y][x] = Cell::Food(BASE_FOOD_AMOUNT);
                         }
                     }
                     Cell::Trail { ttl, .. } => {
                         if *ttl == 0 {
-                            *cell = Cell::Grass
+                            self.cells[y][x] = Cell::Grass
                         } else {
                             *ttl -= 1;
                         }
@@ -165,13 +176,19 @@ impl Environment {
                     }
                     Cell::Food(amount) => {
                         if *amount < FOOD_DECAY_RATE {
-                            *cell = Cell::Grass
+                            self.cells[y][x] = Cell::Grass;
                         } else {
                             *amount -= FOOD_DECAY_RATE;
                         }
                     }
                     Cell::Ant(ant) => {
-                        //
+                        if ant.ttl == 0 {
+                            self.dynasties[ant.dynasty_id as usize].ants -= 1;
+                            self.cells[y][x] =
+                                Cell::Food(ant.carries_food + ANT_SPAWN_COST);
+                        } else {
+                            ant.ttl -= 1;
+                        }
                     }
                 }
             }

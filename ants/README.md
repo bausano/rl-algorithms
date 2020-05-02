@@ -3,23 +3,21 @@
 [video lecture][david-silver-videolecture-3]. Two ant dynasties are fighting
 over randomly distributed resources in an environment. Ants get positive reward
 signal when they kill non related ants, pick up food, and deliver food to nest.
-They get negative reward for being killed and per move. Ant is positioned by `x`
-and `y` coordinate in a grid.
+They get negative reward for being killed and per move. Ant is characterized
+its `x` and `y` coordinate in a grid and by its direction. The direction
+dictates which three adjacent cells to `x:y` the ant can "sense".
 
-An ant can take 4 move actions. It has good enough senses to see the current
-state of the environment around it.
+In the following scenario, the ant's direction is "left" as it can "sense" the
+cells to the left.
 ```text
-+---+---+---+---+---+
-|   | v1| v1| v1|   |
-+---+---+---+---+---+
-| v4|   | A1|   | v2|
-+---+---+---+---+---+
-| v4|A4 |🐜 | A2| v2|
-+---+---+---+---+---+
-| v4|   | A3|   | v2|
-+---+---+---+---+---+
-|   | v3| v3| v3|   |
-+---+---+---+---+---+
+ x-1  x  x+1
++---+---+---+
+| o |   |   |  y-1
++---+---+---+
+| o | A |   |  y
++---+---+---+
+| o |   |   |  y+1
++---+---+---+
 ```
 
 Each dynasty has got N ants. When ants are killed they cost food to re-spawn.
@@ -43,6 +41,9 @@ I am hoping this could lead to specializations of ants (i.e. ant #3, #25 and
 6. Each environment is an episode. When all but one dynasty is wiped, order them
     by how long they survived. Then take the two fittest, combine their value
     functions, and replace the least fit dynasty by this new one.
+7. Generate "king of the hill" scenario. Set higher negative reward for certain
+    radius (because ants have to climb uphill), but in the centre of the circle
+    set high probability of food spawn.
 
 <!-- Invisible List of References -->
 [david-silver-videolecture-3]: https://youtu.be/Nd1-UUMVfz4?t=1771
