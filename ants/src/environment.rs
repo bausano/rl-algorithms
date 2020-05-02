@@ -4,11 +4,11 @@ use rand::prelude::*;
 // -------------------------------- Constants --------------------------------//
 
 // How long before trail goes cold.
-const TRAIL_TTL: u16 = 10;
+const TRAIL_TTL: u16 = 16;
 
 // How likely is it that a new nutrients resource is spawned in a cell. Some
 // cells might have probability based on their position.
-const FOOD_SPAWN_P: f32 = 0.000008;
+const FOOD_SPAWN_P: f32 = 0.000004;
 
 // How much food is spawned (+-).
 const BASE_FOOD_AMOUNT: FoodUnit = 1000;
@@ -20,8 +20,10 @@ const FOOD_DECAY_RATE: FoodUnit = 3;
 // the nest has enough food to support it. One ant is spawned per step.
 const ANT_SPAWN_COST: FoodUnit = 100;
 
-// How many steps does a single ant live.
-const ANT_TTL: u16 = 2500;
+// How many steps does a single ant live. This directly affects how much can a
+// dynasty spread around. If the size of the environment is large, the ants
+// might not have enough time to travel around to get food and come back.
+const ANT_TTL: u16 = 3000;
 
 // Initially, how much extra food does a dynasty get. By default it gets at
 // least `ANT_SPAWN_COST`, otherwise it's a foobar.
@@ -29,6 +31,12 @@ const INITIAL_DYNASTY_EXTRA_FOOD: FoodUnit = 250;
 
 // They say ant can cary more than its weight, right?
 const MAX_FOOD_ANT_CAN_CARRY: FoodUnit = 300;
+
+// How many ants at most can a dynasty have.
+const MAX_ANTS_PER_DYNASTY: usize = 200;
+
+// How much food can be stored in a dynasty at most.
+const MAX_DYNASTY_FOOD_STOCK: usize = 5000;
 
 // ---------------------------------- Types ----------------------------------//
 
@@ -282,7 +290,9 @@ impl Environment {
             Cell::Nest(dynasty_id) => {
                 let dynasty_id = *dynasty_id;
                 let d_i = dynasty_id as usize;
-                if self.dynasties[d_i].food >= ANT_SPAWN_COST {
+                if self.dynasties[d_i].food >= ANT_SPAWN_COST
+                    && self.dynasties[d_i].ants <= MAX_ANTS_PER_DYNASTY
+                {
                     // If there's enough food to spawn a new ant, try to
                     // find an empty cell where to put it.
                     // Because we spawned nests randomly, but made sure
@@ -353,87 +363,87 @@ impl Environment {
             mut ant,
         } = ant_move;
 
-        let new_coords = ant.direction.new_coords(x, y, self.size);
-        // This sucks but I am not willing to tolerate the extra indentation.
-        // Maybe make it return an option?
-        if new_coords.is_none() {
-            return;
-        }
-        let (new_x, new_y) = new_coords.unwrap();
-
-        // let target_cell = &mut self.cells[new_y][new_x];
-        match self.cells[new_y][new_x] {
-            // Move ant.
-            Cell::Grass | Cell::Trail { .. } => {
-                self.cells[new_y][new_x] = ant.into();
-                self.cells[y][x] = Cell::trail(ant.dynasty_id);
-            }
-            Cell::Ant {
-                direction,
-                dynasty_id,
-                carries_food,
-                ..
-            } => {
-                if dynasty_id != ant.dynasty_id {
-                    // If both ants point against each other, they fight.
-                    // Otherwise our ant feeds on the one in the target cell.
-                    if direction.is_inverse(ant.direction) {
-                        todo!("Fight!");
-                    } else {
-                        let can_carry =
-                            MAX_FOOD_ANT_CAN_CARRY - ant.carries_food;
-                        if can_carry >= carries_food {
-                            ant.carries_food += carries_food;
+        if let Some((new_x, new_y)) = ant.direction.new_coords(x, y, self.size)
+        {
+            match self.cells[new_y][new_x] {
+                // Move ant.
+                Cell::Grass | Cell::Trail { .. } => {
+                    self.cells[new_y][new_x] = ant.into();
+                    self.cells[y][x] = Cell::trail(ant.dynasty_id);
+                }
+                Cell::Ant {
+                    direction,
+                    dynasty_id,
+                    carries_food,
+                    ..
+                } => {
+                    if dynasty_id != ant.dynasty_id {
+                        // If both ants point against each other, they fight.
+                        // Otherwise our ant feeds on the one in the target cell.
+                        if direction.is_inverse(ant.direction) {
+                            // todo!("Fight!");
                         } else {
-                            ant.carries_food = MAX_FOOD_ANT_CAN_CARRY;
+                            let can_carry =
+                                MAX_FOOD_ANT_CAN_CARRY - ant.carries_food;
+                            if can_carry >= carries_food {
+                                ant.carries_food += carries_food;
+                            } else {
+                                ant.carries_food = MAX_FOOD_ANT_CAN_CARRY;
+                            }
+                            reward = 1;
+                            self.cells[y][x] = Cell::trail(ant.dynasty_id);
+                            self.cells[new_y][new_x] = ant.into();
                         }
-                        self.cells[y][x] = Cell::trail(ant.dynasty_id);
-                        self.cells[new_y][new_x] = ant.into();
                     }
                 }
-            }
-            Cell::Food(amount) => {
-                // Do we want to reward based on amount of food
-                // picked up?
-                reward = 1;
-                let can_carry = MAX_FOOD_ANT_CAN_CARRY - ant.carries_food;
+                Cell::Food(amount) => {
+                    // Do we want to reward based on amount of food
+                    // picked up?
+                    reward = 1;
+                    let can_carry = MAX_FOOD_ANT_CAN_CARRY - ant.carries_food;
 
-                // Takes as much food as the little guy can.
-                if can_carry >= amount {
-                    ant.carries_food += amount;
-                    self.cells[new_y][new_x] = Cell::Grass;
-                } else {
-                    ant.carries_food = MAX_FOOD_ANT_CAN_CARRY;
-                    self.cells[new_y][new_x] = Cell::Food(amount - can_carry);
+                    // Takes as much food as the little guy can.
+                    if can_carry >= amount {
+                        ant.carries_food += amount;
+                        self.cells[new_y][new_x] = Cell::Grass;
+                    } else {
+                        ant.carries_food = MAX_FOOD_ANT_CAN_CARRY;
+                        self.cells[new_y][new_x] =
+                            Cell::Food(amount - can_carry);
+                    }
+
+                    self.cells[y][x] = ant.into();
                 }
+                Cell::Nest(dynasty_id) => {
+                    let d_i = dynasty_id as usize;
+                    let ant_dynasty_id = ant.dynasty_id;
+                    if ant_dynasty_id == dynasty_id {
+                        // Disposes of food if any and there's space in the nest.
+                        if ant.carries_food > 0
+                            && self.dynasties[d_i].food
+                                < MAX_DYNASTY_FOOD_STOCK - FOOD_DECAY_RATE
+                        {
+                            self.dynasties[d_i].food += self.dynasties[d_i]
+                                .food
+                                .saturating_add(ant.carries_food);
+                            reward = 1;
+                            self.cells[y][x] = ant.into();
+                        }
+                    } else if self.dynasties[d_i].food > 0 {
+                        let can_carry =
+                            MAX_FOOD_ANT_CAN_CARRY - ant.carries_food;
 
-                self.cells[y][x] = ant.into();
-            }
-            Cell::Nest(dynasty_id) => {
-                let d_i = dynasty_id as usize;
-                let ant_dynasty_id = ant.dynasty_id;
-                if ant_dynasty_id == dynasty_id {
-                    // Disposes of food if any.
-                    if ant.carries_food > 0 {
-                        self.dynasties[d_i].food += self.dynasties[d_i]
-                            .food
-                            .saturating_add(ant.carries_food);
+                        // Loot enemy nest as much as the ant can.
+                        if can_carry >= self.dynasties[d_i].food {
+                            ant.carries_food += self.dynasties[d_i].food;
+                            self.dynasties[d_i].food = 0;
+                        } else {
+                            ant.carries_food = MAX_FOOD_ANT_CAN_CARRY;
+                            self.dynasties[d_i].food -= can_carry;
+                        }
                         reward = 1;
                         self.cells[y][x] = ant.into();
                     }
-                } else if self.dynasties[d_i].food > 0 {
-                    let can_carry = MAX_FOOD_ANT_CAN_CARRY - ant.carries_food;
-
-                    // Loot enemy nest as much as the ant can.
-                    if can_carry >= self.dynasties[d_i].food {
-                        ant.carries_food += self.dynasties[d_i].food;
-                        self.dynasties[d_i].food = 0;
-                    } else {
-                        ant.carries_food = MAX_FOOD_ANT_CAN_CARRY;
-                        self.dynasties[d_i].food -= can_carry;
-                    }
-                    reward = 1;
-                    self.cells[y][x] = ant.into();
                 }
             }
         }

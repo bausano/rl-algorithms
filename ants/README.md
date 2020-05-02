@@ -35,7 +35,7 @@ I am hoping this could lead to specializations of ants (i.e. ant #3, #25 and
 1. Making it more likely to spawn new nutrients in some areas of the environment
     should make for more interesting play.
 2. Create an environment for each core to learn in parallel.
-3. Allow multiple dynasties in one environment.
+3. [x] Allow multiple dynasties in one environment.
 4. Implement a genetic algorithm that competes with the RL one.
 5. Spawning new ants gets more expensive with number of ants.
 6. Each environment is an episode. When all but one dynasty is wiped, order them
@@ -44,6 +44,12 @@ I am hoping this could lead to specializations of ants (i.e. ant #3, #25 and
 7. Generate "king of the hill" scenario. Set higher negative reward for certain
     radius (because ants have to climb uphill), but in the centre of the circle
     set high probability of food spawn.
+8. When a dynasty dies off, their other dynasty can take over their nest.
+
+
+![Ants moving according to a random policy](docs/random_policy.png)
+
+*Ants moving according to a random policy*
 
 <!-- Invisible List of References -->
 [david-silver-videolecture-3]: https://youtu.be/Nd1-UUMVfz4?t=1771
