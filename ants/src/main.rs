@@ -35,8 +35,8 @@ fn render(t: usize, environment: &Environment) {
     const DYN_ANT_COLOURS: &[[u8; 3]] = &[[255, 30, 0], [87, 255, 117]];
     const DYN_TRAIL_COLOURS: &[[u8; 3]] = &[[254, 181, 172], [188, 255, 202]];
 
-    let size = environment.cells.len();
-    let mut image = image::DynamicImage::new_rgb8(size as u32, size as u32);
+    let size = environment.size as u32;
+    let mut image = image::DynamicImage::new_rgb8(size, size);
     let image_view = image.as_mut_rgb8().unwrap();
 
     for (y, row) in environment.cells.iter().enumerate() {

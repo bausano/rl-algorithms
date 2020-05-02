@@ -40,6 +40,9 @@ pub type FoodUnit = usize;
 
 #[derive(Debug)]
 pub struct Environment {
+    /// The size of the environment, which is a square. Each vector in `cells`
+    /// has length of `size`.
+    pub size: usize,
     /// The environment is represented by a grid where the outer vector
     /// represents rows and the inner represents cells, i.e the position in the
     /// outer one is `y` and position in the inner one is `x`.
@@ -126,6 +129,7 @@ impl Environment {
         }
 
         Self {
+            size,
             rng,
             cells,
             dynasties,
@@ -164,75 +168,212 @@ impl Cell {
     }
 }
 
+impl Direction {
+    pub fn rand(rng: &mut ThreadRng) -> Option<Self> {
+        match rng.gen_range(0, 6) {
+            0 => Some(Self::North),
+            1 => Some(Self::East),
+            2 => Some(Self::West),
+            3 => Some(Self::South),
+            4 => None,
+            _ => panic!("Cannot go out of range <0; 5>."),
+        }
+    }
+
+    // If an ant moves in a given direction from current position in given size
+    // if the environment, what's going to be its new position.
+    fn new_coords(self, x: usize, y: usize, size: usize) -> (usize, usize) {
+        match self {
+            Self::North if y > 0 => (x, y - 1),
+            Self::South if y < size - 1 => (x, y + 1),
+            Self::West if x > 0 => (x - 1, y),
+            Self::East if x < size - 1 => (x + 1, y),
+            _ => (x, y),
+        }
+    }
+}
+
 // ------------------------------ XXX -----------------------------//
+
+enum SkipCell {
+    // todo rename
+    NextCell,
+    SameCellNextRow,
+}
 
 impl Environment {
     pub fn step(&mut self) {
-        for y in 0..self.cells.len() {
-            for x in 0..self.cells[y].len() {
-                match &mut self.cells[y][x] {
-                    Cell::Grass => {
-                        let should_spawn_food =
-                            self.rng.roll_dice(FOOD_SPAWN_P);
-                        if should_spawn_food {
-                            // TODO: Make this a distribution.
-                            // TODO: Some parts of the environment are more
-                            // fruitful (king of the hill).
-                            self.cells[y][x] = Cell::Food(BASE_FOOD_AMOUNT);
+        for y in 0..self.size {
+            let mut skip_next_cell = false;
+            for x in 0..self.size {
+                if skip_next_cell {
+                    skip_next_cell = false;
+                    continue;
+                }
+
+                match self.single_cell_step(x, y) {
+                    Some(SkipCell::NextCell) => skip_next_cell = true,
+                    Some(SkipCell::SameCellNextRow) => {
+                        todo!("Skip cell next row")
+                    }
+                    None => (),
+                }
+            }
+        }
+    }
+
+    fn single_cell_step(&mut self, x: usize, y: usize) -> Option<SkipCell> {
+        match &mut self.cells[y][x] {
+            Cell::Grass => {
+                let should_spawn_food = self.rng.roll_dice(FOOD_SPAWN_P);
+                if should_spawn_food {
+                    // TODO: Make this a distribution.
+                    // TODO: Some parts of the environment are more
+                    // fruitful (king of the hill).
+                    self.cells[y][x] = Cell::Food(BASE_FOOD_AMOUNT);
+                }
+                None
+            }
+            Cell::Trail { ttl, .. } => {
+                if *ttl == 0 {
+                    self.cells[y][x] = Cell::Grass
+                } else {
+                    *ttl -= 1;
+                }
+                None
+            }
+            Cell::Nest(dynasty_id) => {
+                let dynasty_id = *dynasty_id;
+                let d_i = dynasty_id as usize;
+                if self.dynasties[d_i].food >= ANT_SPAWN_COST {
+                    // If there's enough food to spawn a new ant, try to
+                    // find an empty cell where to put it.
+                    // Because we spawned nests randomly, but made sure
+                    // not on the edges of the environment, this
+                    // shouldn't overflow.
+                    for inc in 0..3 {
+                        let cell = &mut self.cells[y + 1][x - 1 + inc];
+                        if cell.is_grass() {
+                            *cell = Cell::Ant(Ant::new(dynasty_id));
+                            self.dynasties[d_i].food -= ANT_SPAWN_COST;
+                            self.dynasties[d_i].ants += 1;
+                            break;
                         }
                     }
-                    Cell::Trail { ttl, .. } => {
-                        if *ttl == 0 {
-                            self.cells[y][x] = Cell::Grass
-                        } else {
-                            *ttl -= 1;
-                        }
-                    }
-                    Cell::Nest(dynasty_id) => {
-                        let dynasty_id = *dynasty_id;
-                        let d_i = dynasty_id as usize;
-                        if self.dynasties[d_i].food >= ANT_SPAWN_COST {
-                            // If there's enough food to spawn a new ant, try to
-                            // find an empty cell where to put it.
-                            // Because we spawned nests randomly, but made sure
-                            // not on the edges of the environment, this
-                            // shouldn't overflow.
-                            for inc in 0..3 {
-                                let mut cell =
-                                    &mut self.cells[y + 1][x - 1 + inc];
-                                if cell.is_grass() {
-                                    *cell = Cell::Ant(Ant::new(dynasty_id));
-                                    self.dynasties[d_i].food -= ANT_SPAWN_COST;
-                                    self.dynasties[d_i].ants += 1;
-                                    break;
+                }
+
+                // We want to decay food in the nest, so that we can
+                // kill off a dynasty which has low food and no ants.
+                self.dynasties[d_i].food =
+                    self.dynasties[d_i].food.saturating_sub(FOOD_DECAY_RATE);
+                None
+            }
+            Cell::Food(amount) => {
+                if *amount < FOOD_DECAY_RATE {
+                    self.cells[y][x] = Cell::Grass;
+                } else {
+                    *amount -= FOOD_DECAY_RATE;
+                }
+                None
+            }
+            Cell::Ant(ant) => {
+                if ant.ttl == 0 {
+                    self.dynasties[ant.dynasty_id as usize].ants -= 1;
+                    self.cells[y][x] =
+                        Cell::Food(ant.carries_food + ANT_SPAWN_COST);
+                    None
+                } else {
+                    ant.ttl -= 1;
+                    let mut reward = -1;
+
+                    // TODO: Get 3 cells in front of an ant and get an action
+                    // via the policy.
+                    let skip_next_cell = if let Some(action) =
+                        Direction::rand(&mut self.rng)
+                    {
+                        ant.direction = action;
+                        // We don't care if the `new_x == x` and
+                        // `new_y == y`, i.e. ant doesn't move, because
+                        // a match arm which moves ant on top of an ant
+                        // from the same dynasty will simply ignore the
+                        // action.
+                        let (new_x, new_y) = action.new_coords(x, y, self.size);
+                        // let target_cell = &mut self.cells[new_y][new_x];
+                        match self.cells[new_y][new_x] {
+                            Cell::Grass | Cell::Trail { .. } => {
+                                let dynasty_id = ant.dynasty_id;
+                                self.cells[new_y][new_x] = Cell::Ant(*ant);
+                                self.cells[y][x] = Cell::Trail {
+                                    dynasty_id,
+                                    ttl: TRAIL_TTL,
+                                };
+
+                                Some(SkipCell::NextCell)
+                            }
+                            Cell::Ant(another_ant) => {
+                                if another_ant.dynasty_id == ant.dynasty_id {
+                                    None
+                                } else {
+                                    todo!("Fight!")
                                 }
                             }
-                        }
+                            Cell::Food(amount) => {
+                                // Do we want to reward based on amount of food
+                                // picked up?
+                                reward = 1;
+                                let can_carry =
+                                    MAX_FOOD_ANT_CAN_CARRY - ant.carries_food;
 
-                        // We want to decay food in the nest, so that we can
-                        // kill off a dynasty which has low food and no ants.
-                        self.dynasties[d_i].food = self.dynasties[d_i]
-                            .food
-                            .saturating_sub(FOOD_DECAY_RATE);
-                    }
-                    Cell::Food(amount) => {
-                        if *amount < FOOD_DECAY_RATE {
-                            self.cells[y][x] = Cell::Grass;
-                        } else {
-                            *amount -= FOOD_DECAY_RATE;
-                        }
-                    }
-                    Cell::Ant(ant) => {
-                        if ant.ttl == 0 {
-                            self.dynasties[ant.dynasty_id as usize].ants -= 1;
-                            self.cells[y][x] =
-                                Cell::Food(ant.carries_food + ANT_SPAWN_COST);
-                        } else {
-                            ant.ttl -= 1;
+                                // Takes as much food as the little guy can.
+                                if can_carry >= amount {
+                                    ant.carries_food += amount;
+                                    self.cells[new_y][new_x] = Cell::Grass;
+                                } else {
+                                    ant.carries_food = MAX_FOOD_ANT_CAN_CARRY;
+                                    self.cells[new_y][new_x] =
+                                        Cell::Food(amount - can_carry);
+                                }
 
-                            // TODO: Ant action.
+                                None
+                            }
+                            Cell::Nest(dynasty_id) => {
+                                let d_i = dynasty_id as usize;
+                                let ant_dynasty_id = ant.dynasty_id;
+                                if ant_dynasty_id == dynasty_id {
+                                    // Disposes of food if any.
+                                    if ant.carries_food > 0 {
+                                        self.dynasties[d_i].food += self
+                                            .dynasties[d_i]
+                                            .food
+                                            .saturating_add(ant.carries_food);
+                                        reward = 1;
+                                    }
+                                } else {
+                                    let can_carry = MAX_FOOD_ANT_CAN_CARRY
+                                        - ant.carries_food;
+
+                                    // Loot enemy nest as much as the ant can.
+                                    if can_carry >= self.dynasties[d_i].food {
+                                        ant.carries_food +=
+                                            self.dynasties[d_i].food;
+                                        self.dynasties[d_i].food = 0;
+                                    } else {
+                                        ant.carries_food =
+                                            MAX_FOOD_ANT_CAN_CARRY;
+                                        self.dynasties[d_i].food -= can_carry;
+                                    }
+                                }
+
+                                None
+                            }
                         }
-                    }
+                    } else {
+                        None
+                    };
+
+                    // TODO: Apply reward.
+
+                    skip_next_cell
                 }
             }
         }
