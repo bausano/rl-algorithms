@@ -3,21 +3,23 @@
 [video lecture][david-silver-videolecture-3]. Two ant dynasties are fighting
 over randomly distributed resources in an environment. Ants get positive reward
 signal when they kill non related ants, pick up food, and deliver food to nest.
-They get negative reward for being killed and per move. Ant is characterized
-its `x` and `y` coordinate in a grid and by its direction. The direction
-dictates which three adjacent cells to `x:y` the ant can "sense".
+They get negative reward for being killed and per move. Ant is positioned by `x`
+and `y` coordinate in a grid.
 
-In the following scenario, the ant's direction is "left" as it can "sense" the
-cells to the left.
+An ant can take 4 move actions. It has good enough senses to see the current
+state of the environment around it.
 ```text
- x-1  x  x+1
-+---+---+---+
-| o |   |   |  y-1
-+---+---+---+
-| o | A |   |  y
-+---+---+---+
-| o |   |   |  y+1
-+---+---+---+
++---+---+---+---+---+
+|   | v1| v1| v1|   |
++---+---+---+---+---+
+| v4|   | A1|   | v2|
++---+---+---+---+---+
+| v4|A4 |🐜 | A2| v2|
++---+---+---+---+---+
+| v4|   | A3|   | v2|
++---+---+---+---+---+
+|   | v3| v3| v3|   |
++---+---+---+---+---+
 ```
 
 Each dynasty has got N ants. When ants are killed they cost food to re-spawn.
@@ -38,6 +40,9 @@ I am hoping this could lead to specializations of ants (i.e. ant #3, #25 and
 3. Allow multiple dynasties in one environment.
 4. Implement a genetic algorithm that competes with the RL one.
 5. Spawning new ants gets more expensive with number of ants.
+6. Each environment is an episode. When all but one dynasty is wiped, order them
+    by how long they survived. Then take the two fittest, combine their value
+    functions, and replace the least fit dynasty by this new one.
 
 <!-- Invisible List of References -->
 [david-silver-videolecture-3]: https://youtu.be/Nd1-UUMVfz4?t=1771
