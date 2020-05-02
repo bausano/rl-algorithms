@@ -30,7 +30,7 @@ fn main() {
 // https://color.adobe.com/create
 // https://www.rapidtables.com/convert/color/hex-to-rgb.html
 fn render(t: usize, environment: &Environment) {
-    use environment::{Ant, Cell};
+    use environment::Cell;
     const DYN_NEST_COLOURS: &[[u8; 3]] = &[[139, 0, 0], [87, 128, 94]];
     const DYN_ANT_COLOURS: &[[u8; 3]] = &[[255, 30, 0], [87, 255, 117]];
     const DYN_TRAIL_COLOURS: &[[u8; 3]] = &[[254, 181, 172], [188, 255, 202]];
@@ -51,7 +51,7 @@ fn render(t: usize, environment: &Environment) {
                 Cell::Nest(dynasty_id) => {
                     pixel.0 = DYN_NEST_COLOURS[*dynasty_id as usize]
                 }
-                Cell::Ant(Ant { dynasty_id, .. }) => {
+                Cell::Ant { dynasty_id, .. } => {
                     pixel.0 = DYN_ANT_COLOURS[*dynasty_id as usize]
                 }
             }

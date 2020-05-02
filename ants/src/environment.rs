@@ -51,6 +51,8 @@ pub struct Environment {
     pub dynasties: Vec<Dynasty>,
     // Some goodies.
     rng: ThreadRng,
+    // Caching memory so that it can be reused between steps.
+    updates: Vec<AntMove>,
 }
 
 #[derive(Clone, Debug)]
@@ -74,18 +76,22 @@ pub enum Direction {
     West,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct Ant {
-    pub dynasty_id: DynastyId,
-    pub carries_food: FoodUnit,
-    pub direction: Direction,
-    pub ttl: u16,
-}
-
+// #[derive(Clone, Copy, Debug)]
+// pub struct Ant {
+//     pub dynasty_id: DynastyId,
+//     pub carries_food: FoodUnit,
+//     pub direction: Direction,
+//     pub ttl: u16,
+// }
 #[derive(Clone, Copy, Debug)]
 pub enum Cell {
     Grass,
-    Ant(Ant),
+    Ant {
+        dynasty_id: DynastyId,
+        carries_food: FoodUnit,
+        direction: Direction,
+        ttl: u16,
+    },
     /// Where ants have to return with their food. Non related nest is
     /// considered source of food and enemy ants can steal food.
     Nest(DynastyId),
@@ -96,6 +102,12 @@ pub enum Cell {
     },
     /// A counter which describes quantity of nutrition left.
     Food(FoodUnit),
+}
+
+#[derive(Clone, Copy, Debug)]
+struct AntMove {
+    from: (usize, usize),
+    direction: Direction,
 }
 
 // ------------------------------ Support impl -------------------------------//
@@ -133,6 +145,7 @@ impl Environment {
             rng,
             cells,
             dynasties,
+            updates: Vec::new(),
         }
     }
 }
@@ -147,9 +160,16 @@ impl Dynasty {
     }
 }
 
-impl Ant {
-    fn new(dynasty_id: DynastyId) -> Self {
-        Self {
+impl Cell {
+    fn is_grass(&self) -> bool {
+        match self {
+            Self::Grass => true,
+            _ => false,
+        }
+    }
+
+    fn ant(dynasty_id: DynastyId) -> Self {
+        Self::Ant {
             dynasty_id,
             carries_food: 0,
             ttl: ANT_TTL,
@@ -159,70 +179,54 @@ impl Ant {
     }
 }
 
-impl Cell {
-    fn is_grass(&self) -> bool {
-        match self {
-            Self::Grass => true,
-            _ => false,
-        }
-    }
-}
-
 impl Direction {
-    pub fn rand(rng: &mut ThreadRng) -> Option<Self> {
-        match rng.gen_range(0, 6) {
-            0 => Some(Self::North),
-            1 => Some(Self::East),
-            2 => Some(Self::West),
-            3 => Some(Self::South),
-            4 => None,
+    pub fn rand(rng: &mut ThreadRng) -> Self {
+        match rng.gen_range(0, 5) {
+            0 => Self::North,
+            1 => Self::East,
+            2 => Self::West,
+            3 => Self::South,
             _ => panic!("Cannot go out of range <0; 5>."),
         }
     }
 
     // If an ant moves in a given direction from current position in given size
     // if the environment, what's going to be its new position.
-    fn new_coords(self, x: usize, y: usize, size: usize) -> (usize, usize) {
+    // Returns `None` if the ant cannot move in the direction.
+    fn new_coords(
+        self,
+        x: usize,
+        y: usize,
+        size: usize,
+    ) -> Option<(usize, usize)> {
         match self {
-            Self::North if y > 0 => (x, y - 1),
-            Self::South if y < size - 1 => (x, y + 1),
-            Self::West if x > 0 => (x - 1, y),
-            Self::East if x < size - 1 => (x + 1, y),
-            _ => (x, y),
+            Self::North if y > 0 => Some((x, y - 1)),
+            Self::South if y < size - 1 => Some((x, y + 1)),
+            Self::West if x > 0 => Some((x - 1, y)),
+            Self::East if x < size - 1 => Some((x + 1, y)),
+            _ => None,
         }
     }
 }
 
 // ------------------------------ XXX -----------------------------//
 
-enum SkipCell {
-    // todo rename
-    NextCell,
-    SameCellNextRow,
-}
-
 impl Environment {
     pub fn step(&mut self) {
         for y in 0..self.size {
-            let mut skip_next_cell = false;
             for x in 0..self.size {
-                if skip_next_cell {
-                    skip_next_cell = false;
-                    continue;
-                }
-
-                match self.single_cell_step(x, y) {
-                    Some(SkipCell::NextCell) => skip_next_cell = true,
-                    Some(SkipCell::SameCellNextRow) => {
-                        todo!("Skip cell next row")
-                    }
-                    None => (),
+                if let Some(update) = self.single_cell_step(x, y) {
+                    self.updates.push(update);
                 }
             }
         }
+
+        while let Some(ant_move) = self.updates.pop() {
+            self.move_ant(ant_move);
+        }
     }
 
-    fn single_cell_step(&mut self, x: usize, y: usize) -> Option<SkipCell> {
+    fn single_cell_step(&mut self, x: usize, y: usize) -> Option<AntMove> {
         match &mut self.cells[y][x] {
             Cell::Grass => {
                 let should_spawn_food = self.rng.roll_dice(FOOD_SPAWN_P);
@@ -254,7 +258,7 @@ impl Environment {
                     for inc in 0..3 {
                         let cell = &mut self.cells[y + 1][x - 1 + inc];
                         if cell.is_grass() {
-                            *cell = Cell::Ant(Ant::new(dynasty_id));
+                            *cell = Cell::ant(dynasty_id);
                             self.dynasties[d_i].food -= ANT_SPAWN_COST;
                             self.dynasties[d_i].ants += 1;
                             break;
@@ -276,106 +280,114 @@ impl Environment {
                 }
                 None
             }
-            Cell::Ant(ant) => {
-                if ant.ttl == 0 {
-                    self.dynasties[ant.dynasty_id as usize].ants -= 1;
+            Cell::Ant {
+                ttl,
+                direction,
+                dynasty_id,
+                carries_food,
+            } => {
+                if *ttl == 0 {
+                    self.dynasties[*dynasty_id as usize].ants -= 1;
                     self.cells[y][x] =
-                        Cell::Food(ant.carries_food + ANT_SPAWN_COST);
+                        Cell::Food(*carries_food + ANT_SPAWN_COST);
                     None
                 } else {
-                    ant.ttl -= 1;
-                    let mut reward = -1;
+                    *ttl -= 1;
 
                     // TODO: Get 3 cells in front of an ant and get an action
-                    // via the policy.
-                    let skip_next_cell = if let Some(action) =
-                        Direction::rand(&mut self.rng)
-                    {
-                        ant.direction = action;
-                        // We don't care if the `new_x == x` and
-                        // `new_y == y`, i.e. ant doesn't move, because
-                        // a match arm which moves ant on top of an ant
-                        // from the same dynasty will simply ignore the
-                        // action.
-                        let (new_x, new_y) = action.new_coords(x, y, self.size);
-                        // let target_cell = &mut self.cells[new_y][new_x];
-                        match self.cells[new_y][new_x] {
-                            Cell::Grass | Cell::Trail { .. } => {
-                                let dynasty_id = ant.dynasty_id;
-                                self.cells[new_y][new_x] = Cell::Ant(*ant);
-                                self.cells[y][x] = Cell::Trail {
-                                    dynasty_id,
-                                    ttl: TRAIL_TTL,
-                                };
+                    // via the policy instead of random moves.
+                    let action = Direction::rand(&mut self.rng);
+                    *direction = action;
 
-                                Some(SkipCell::NextCell)
-                            }
-                            Cell::Ant(another_ant) => {
-                                if another_ant.dynasty_id == ant.dynasty_id {
-                                    None
-                                } else {
-                                    todo!("Fight!")
-                                }
-                            }
-                            Cell::Food(amount) => {
-                                // Do we want to reward based on amount of food
-                                // picked up?
-                                reward = 1;
-                                let can_carry =
-                                    MAX_FOOD_ANT_CAN_CARRY - ant.carries_food;
-
-                                // Takes as much food as the little guy can.
-                                if can_carry >= amount {
-                                    ant.carries_food += amount;
-                                    self.cells[new_y][new_x] = Cell::Grass;
-                                } else {
-                                    ant.carries_food = MAX_FOOD_ANT_CAN_CARRY;
-                                    self.cells[new_y][new_x] =
-                                        Cell::Food(amount - can_carry);
-                                }
-
-                                None
-                            }
-                            Cell::Nest(dynasty_id) => {
-                                let d_i = dynasty_id as usize;
-                                let ant_dynasty_id = ant.dynasty_id;
-                                if ant_dynasty_id == dynasty_id {
-                                    // Disposes of food if any.
-                                    if ant.carries_food > 0 {
-                                        self.dynasties[d_i].food += self
-                                            .dynasties[d_i]
-                                            .food
-                                            .saturating_add(ant.carries_food);
-                                        reward = 1;
-                                    }
-                                } else {
-                                    let can_carry = MAX_FOOD_ANT_CAN_CARRY
-                                        - ant.carries_food;
-
-                                    // Loot enemy nest as much as the ant can.
-                                    if can_carry >= self.dynasties[d_i].food {
-                                        ant.carries_food +=
-                                            self.dynasties[d_i].food;
-                                        self.dynasties[d_i].food = 0;
-                                    } else {
-                                        ant.carries_food =
-                                            MAX_FOOD_ANT_CAN_CARRY;
-                                        self.dynasties[d_i].food -= can_carry;
-                                    }
-                                }
-
-                                None
-                            }
-                        }
-                    } else {
-                        None
-                    };
-
-                    // TODO: Apply reward.
-
-                    skip_next_cell
+                    Some(AntMove {
+                        from: (x, y),
+                        direction: action,
+                    })
                 }
             }
         }
+    }
+
+    fn move_ant(&mut self, ant_move: AntMove) {
+        let mut reward = -1;
+        let AntMove {
+            direction,
+            from: (x, y),
+        } = ant_move;
+
+        let new_coords = direction.new_coords(x, y, self.size);
+        // This sucks but I am not willing to tolerate the extra indentation.
+        // Maybe make it return an option?
+        if new_coords.is_none() {
+            return;
+        }
+        let (new_x, new_y) = new_coords.unwrap();
+        let target_cell = &mut self.cells[new_y][new_x];
+        // match self.cells[new_y][new_x] {
+        //     Cell::Grass | Cell::Trail { .. } => {
+        //         let dynasty_id = ant.dynasty_id;
+        //         self.cells[new_y][new_x] = Cell::Ant(*ant);
+        //         self.cells[y][x] = Cell::Trail {
+        //             dynasty_id,
+        //             ttl: TRAIL_TTL,
+        //         };
+        //     }
+        //     Cell::Ant(another_ant) => {
+        //         if another_ant.dynasty_id == ant.dynasty_id {
+        //             None
+        //         } else {
+        //             todo!("Fight!")
+        //         }
+        //     }
+        //     Cell::Food(amount) => {
+        //         // Do we want to reward based on amount of food
+        //         // picked up?
+        //         reward = 1;
+        //         let can_carry =
+        //             MAX_FOOD_ANT_CAN_CARRY - ant.carries_food;
+
+        //         // Takes as much food as the little guy can.
+        //         if can_carry >= amount {
+        //             ant.carries_food += amount;
+        //             self.cells[new_y][new_x] = Cell::Grass;
+        //         } else {
+        //             ant.carries_food = MAX_FOOD_ANT_CAN_CARRY;
+        //             self.cells[new_y][new_x] =
+        //                 Cell::Food(amount - can_carry);
+        //         }
+
+        //         None
+        //     }
+        //     Cell::Nest(dynasty_id) => {
+        //         let d_i = dynasty_id as usize;
+        //         let ant_dynasty_id = ant.dynasty_id;
+        //         if ant_dynasty_id == dynasty_id {
+        //             // Disposes of food if any.
+        //             if ant.carries_food > 0 {
+        //                 self.dynasties[d_i].food += self
+        //                     .dynasties[d_i]
+        //                     .food
+        //                     .saturating_add(ant.carries_food);
+        //                 reward = 1;
+        //             }
+        //         } else {
+        //             let can_carry = MAX_FOOD_ANT_CAN_CARRY
+        //                 - ant.carries_food;
+
+        //             // Loot enemy nest as much as the ant can.
+        //             if can_carry >= self.dynasties[d_i].food {
+        //                 ant.carries_food +=
+        //                     self.dynasties[d_i].food;
+        //                 self.dynasties[d_i].food = 0;
+        //             } else {
+        //                 ant.carries_food =
+        //                     MAX_FOOD_ANT_CAN_CARRY;
+        //                 self.dynasties[d_i].food -= can_carry;
+        //             }
+        //         }
+
+        //         None
+        //     }
+        // }
     }
 }
