@@ -6,3 +6,5 @@ edition = "2018"
 
 [dependencies]
 rand = "0.7"
+# TODO: Hide behind a feature gate.
+image = "0.23"

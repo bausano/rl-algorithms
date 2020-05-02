@@ -8,7 +8,7 @@ const TRAIL_TTL: u16 = 5;
 
 // How likely is it that a new nutrients resource is spawned in a cell. Some
 // cells might have probability based on their position.
-const FOOD_SPAWN_P: f32 = 0.001;
+const FOOD_SPAWN_P: f32 = 0.000002;
 
 // How much food is spawned (+-).
 const BASE_FOOD_AMOUNT: FoodUnit = 1000;
@@ -35,7 +35,7 @@ const MAX_FOOD_ANT_CAN_CARRY: FoodUnit = 300;
 /// There can be multiple different warring dynasties in a game.
 pub type DynastyId = u8;
 
-/// Nutrients are measured as a counter;
+/// Nutrients are measured as a counter.
 pub type FoodUnit = usize;
 
 #[derive(Debug)]
@@ -143,6 +143,27 @@ impl Dynasty {
     }
 }
 
+impl Ant {
+    fn new(dynasty_id: DynastyId) -> Self {
+        Self {
+            dynasty_id,
+            carries_food: 0,
+            ttl: ANT_TTL,
+            // Arbitrary choice of direction.
+            direction: Direction::South,
+        }
+    }
+}
+
+impl Cell {
+    fn is_grass(&self) -> bool {
+        match self {
+            Self::Grass => true,
+            _ => false,
+        }
+    }
+}
+
 // ------------------------------ XXX -----------------------------//
 
 impl Environment {
@@ -156,7 +177,7 @@ impl Environment {
                         if should_spawn_food {
                             // TODO: Make this a distribution.
                             // TODO: Some parts of the environment are more
-                            // fruitful.
+                            // fruitful (king of the hill).
                             self.cells[y][x] = Cell::Food(BASE_FOOD_AMOUNT);
                         }
                     }
@@ -168,11 +189,31 @@ impl Environment {
                         }
                     }
                     Cell::Nest(dynasty_id) => {
-                        let i = *dynasty_id as usize;
-                        self.dynasties[i].food = self.dynasties[i]
+                        let dynasty_id = *dynasty_id;
+                        let d_i = dynasty_id as usize;
+                        if self.dynasties[d_i].food >= ANT_SPAWN_COST {
+                            // If there's enough food to spawn a new ant, try to
+                            // find an empty cell where to put it.
+                            // Because we spawned nests randomly, but made sure
+                            // not on the edges of the environment, this
+                            // shouldn't overflow.
+                            for inc in 0..3 {
+                                let mut cell =
+                                    &mut self.cells[y + 1][x - 1 + inc];
+                                if cell.is_grass() {
+                                    *cell = Cell::Ant(Ant::new(dynasty_id));
+                                    self.dynasties[d_i].food -= ANT_SPAWN_COST;
+                                    self.dynasties[d_i].ants += 1;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // We want to decay food in the nest, so that we can
+                        // kill off a dynasty which has low food and no ants.
+                        self.dynasties[d_i].food = self.dynasties[d_i]
                             .food
                             .saturating_sub(FOOD_DECAY_RATE);
-                        // TODO: Find empty field around to spawn new ant.
                     }
                     Cell::Food(amount) => {
                         if *amount < FOOD_DECAY_RATE {
@@ -188,6 +229,8 @@ impl Environment {
                                 Cell::Food(ant.carries_food + ANT_SPAWN_COST);
                         } else {
                             ant.ttl -= 1;
+
+                            // TODO: Ant action.
                         }
                     }
                 }
