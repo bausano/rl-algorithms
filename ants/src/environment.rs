@@ -1,7 +1,8 @@
+use crate::dynasty::DynastyAgent;
 use crate::ext::*;
 use rand::prelude::*;
 
-// -------------------------------- Constants --------------------------------//
+//--------------------------------- Constants --------------------------------//
 
 // How long before trail goes cold.
 const TRAIL_TTL: u16 = 16;
@@ -38,7 +39,7 @@ const MAX_ANTS_PER_DYNASTY: usize = 200;
 // How much food can be stored in a dynasty at most.
 const MAX_DYNASTY_FOOD_STOCK: usize = 5000;
 
-// ---------------------------------- Types ----------------------------------//
+//----------------------------------- Types ----------------------------------//
 
 /// There can be multiple different warring dynasties in a game.
 pub type DynastyId = u8;
@@ -55,16 +56,18 @@ pub struct Environment {
     /// represents rows and the inner represents cells, i.e the position in the
     /// outer one is `y` and position in the inner one is `x`.
     pub cells: Vec<Vec<Cell>>,
-    /// Dynasty can died off if their ants are wiped out.
+    /// Dynasty can died off if their ants are wiped out. The index is equal to
+    /// the dynasty id.
     pub dynasties: Vec<Dynasty>,
-    // Some goodies.
+    // Cache randomness generator.
     rng: ThreadRng,
     // Caching memory so that it can be reused between steps.
-    updates: Vec<AntMove>,
+    ant_moves: Vec<AntMove>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Dynasty {
+    /// The same as the index in the array.
     pub id: DynastyId,
     /// Counter for how much food has the dynasty gathered.
     pub food: FoodUnit,
@@ -108,6 +111,8 @@ pub enum Cell {
     /// Where ants have to return with their food. Non related nest is
     /// considered source of food and enemy ants can steal food.
     Nest(DynastyId),
+    /// This seems like a bug.
+    #[allow(dead_code)]
     Trail {
         dynasty_id: DynastyId,
         /// How long until the trail gets cold.
@@ -123,7 +128,7 @@ struct AntMove {
     ant: Ant,
 }
 
-// ------------------------------ Support impl -------------------------------//
+//------------------------------- Support impl -------------------------------//
 
 impl Default for Cell {
     fn default() -> Self {
@@ -135,10 +140,8 @@ impl Environment {
     pub fn new(size: usize, dynasties: u8) -> Self {
         assert!(dynasties > 1);
         assert!(size > dynasties as usize * 5);
-        // An arbitrary restriction to ease up development.
-        // assert!(size % 3 == 0, "Size must be a multiple of 3.");
 
-        let mut rng = thread_rng();
+        let mut rng = ThreadRng::default();
         let dynasties: Vec<Dynasty> =
             (0..dynasties).map(Dynasty::new).collect();
         let mut cells: Vec<Vec<Cell>> = (0..size)
@@ -158,7 +161,7 @@ impl Environment {
             rng,
             cells,
             dynasties,
-            updates: Vec::new(),
+            ant_moves: Vec::new(),
         }
     }
 }
@@ -250,23 +253,29 @@ impl Direction {
     }
 }
 
-// ------------------------------ XXX -----------------------------//
+//------------------------------- World ticking ------------------------------//
 
 impl Environment {
-    pub fn step(&mut self) {
+    pub fn step(&mut self, dynasty_agents: &mut [DynastyAgent]) {
+        // Updates environment.
         for y in 0..self.size {
             for x in 0..self.size {
                 if let Some(update) = self.single_cell_step(x, y) {
-                    self.updates.push(update);
+                    self.ant_moves.push(update);
                 }
             }
         }
 
-        while let Some(ant_move) = self.updates.pop() {
-            self.move_ant(ant_move);
+        // Moves ants.
+        while let Some(ant_move) = self.ant_moves.pop() {
+            let dynasty_agent =
+                &mut dynasty_agents[ant_move.ant.dynasty_id as usize];
+            self.move_ant(dynasty_agent, ant_move);
         }
     }
 
+    // Process for updating environment. It doesn't simulate ant moves because
+    // borrow checker wouldn't be happy. All bow to borrow checker.
     fn single_cell_step(&mut self, x: usize, y: usize) -> Option<AntMove> {
         match &mut self.cells[y][x] {
             Cell::Grass => {
@@ -336,12 +345,6 @@ impl Environment {
                     None
                 } else {
                     *ttl -= 1;
-
-                    // TODO: Get 3 cells in front of an ant and get an action
-                    // via the policy instead of random moves.
-                    let action = Direction::rand(&mut self.rng);
-                    *direction = action;
-
                     Some(AntMove {
                         from: (x, y),
                         ant: Ant {
@@ -356,13 +359,21 @@ impl Environment {
         }
     }
 
-    fn move_ant(&mut self, ant_move: AntMove) {
-        let mut reward = -1;
+    fn move_ant(
+        &mut self,
+        dynasty_agent: &mut DynastyAgent,
+        ant_move: AntMove,
+    ) {
         let AntMove {
             from: (x, y),
             mut ant,
         } = ant_move;
+        // Let the agent do its magic and spit out an action.
+        ant.direction = dynasty_agent.pick_action(&self.cells);
 
+        // By default the ant gets a negative reward, also known as penalty for
+        // breathing.
+        let mut reward = -1.0;
         if let Some((new_x, new_y)) = ant.direction.new_coords(x, y, self.size)
         {
             match self.cells[new_y][new_x] {
@@ -390,7 +401,7 @@ impl Environment {
                             } else {
                                 ant.carries_food = MAX_FOOD_ANT_CAN_CARRY;
                             }
-                            reward = 1;
+                            reward = 1.0;
                             self.cells[y][x] = Cell::trail(ant.dynasty_id);
                             self.cells[new_y][new_x] = ant.into();
                         }
@@ -399,7 +410,7 @@ impl Environment {
                 Cell::Food(amount) => {
                     // Do we want to reward based on amount of food
                     // picked up?
-                    reward = 1;
+                    reward = 1.0;
                     let can_carry = MAX_FOOD_ANT_CAN_CARRY - ant.carries_food;
 
                     // Takes as much food as the little guy can.
@@ -426,7 +437,7 @@ impl Environment {
                             self.dynasties[d_i].food += self.dynasties[d_i]
                                 .food
                                 .saturating_add(ant.carries_food);
-                            reward = 1;
+                            reward = 1.0;
                             self.cells[y][x] = ant.into();
                         }
                     } else if self.dynasties[d_i].food > 0 {
@@ -441,13 +452,13 @@ impl Environment {
                             ant.carries_food = MAX_FOOD_ANT_CAN_CARRY;
                             self.dynasties[d_i].food -= can_carry;
                         }
-                        reward = 1;
+                        reward = 1.0;
                         self.cells[y][x] = ant.into();
                     }
                 }
             }
         }
 
-        // TODO: Apply reward.
+        dynasty_agent.reward(reward);
     }
 }

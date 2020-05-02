@@ -51,5 +51,10 @@ I am hoping this could lead to specializations of ants (i.e. ant #3, #25 and
 
 *Ants moving according to a random policy*
 
+## Notes
+If this is not a RL learning, why not? If we're given just some small view into
+the environment, isn't this the best we can do? What would have to be change for
+this to categorize as RL.
+
 <!-- Invisible List of References -->
 [david-silver-videolecture-3]: https://youtu.be/Nd1-UUMVfz4?t=1771

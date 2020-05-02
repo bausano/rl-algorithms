@@ -1,6 +1,8 @@
+mod dynasty;
 mod environment;
 mod ext;
 
+use dynasty::DynastyAgent;
 use environment::Environment;
 use std::time::Instant;
 
@@ -11,6 +13,8 @@ const GRID_SIZE: usize = 256;
 const DYNASTIES: u8 = 5;
 
 fn main() {
+    let mut dynasty_agents: Vec<_> =
+        (0..DYNASTIES).map(DynastyAgent::new).collect();
     let mut environment = Environment::new(GRID_SIZE, DYNASTIES);
 
     // TODO: This is here for debug.
@@ -18,7 +22,7 @@ fn main() {
     let steps: usize = 4000;
     for step in 0..steps {
         let now = Instant::now();
-        environment.step();
+        environment.step(&mut dynasty_agents);
         elapsed += now.elapsed().as_micros();
 
         if step % 1000 == 0 {
