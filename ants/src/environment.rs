@@ -9,22 +9,22 @@ pub const TRAIL_TTL: u16 = 150;
 
 // How likely is it that a new nutrients resource is spawned in a cell. Some
 // cells might have probability based on their position.
-pub const FOOD_SPAWN_P: f32 = 0.000005;
+pub const FOOD_SPAWN_P: f32 = 0.000001;
 
 // How much food is spawned (+-).
-pub const BASE_FOOD_AMOUNT: FoodUnit = 900;
+pub const BASE_FOOD_AMOUNT: FoodUnit = 10000;
 
 // How much per step does the nutrients lose their value. Also affects the nest.
 pub const FOOD_DECAY_RATE: FoodUnit = 3;
 
 // How much food does it cost to spawn a new ant. New ant is spawned whenever
 // the nest has enough food to support it. One ant is spawned per step.
-pub const ANT_SPAWN_COST: FoodUnit = 30;
+pub const ANT_SPAWN_COST: FoodUnit = 50;
 
 // How many steps does a single ant live. This directly affects how much can a
 // dynasty spread around. If the size of the environment is large, the ants
 // might not have enough time to travel around to get food and come back.
-pub const ANT_TTL: u16 = 2000;
+pub const ANT_TTL: u16 = 3000;
 
 // Initially, how much extra food does a dynasty get. By default it gets at
 // least `ANT_SPAWN_COST`, otherwise it's a foobar.
@@ -102,7 +102,7 @@ pub struct Ant {
     pub direction: Direction,
     pub ttl: u16,
     // Reward for previous action.
-    pub reward: f32,
+    pub reward: Reward,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -115,7 +115,7 @@ pub enum Cell {
         carries_food: FoodUnit,
         direction: Direction,
         ttl: u16,
-        reward: f32,
+        reward: Reward,
     },
     /// Where ants have to return with their food. Non related nest is
     /// considered source of food and enemy ants can steal food.
@@ -129,6 +129,16 @@ pub enum Cell {
     },
     /// A counter which describes quantity of nutrition left.
     Food(FoodUnit),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Reward {
+    PickUpFood,
+    BringFoodToNest,
+    KillEnemy,
+    PenaltyForBreathing,
+    LootEnemyNest,
+    Survivor,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -184,6 +194,47 @@ impl Environment {
             ant_moves: Vec::new(),
         }
     }
+
+    /// Whether we can break the step loop because one dynasty is dominant or
+    /// the environment aged.
+    pub fn is_finished(&self) -> bool {
+        let dynasties_alive = self
+            .dynasties
+            .iter()
+            // Dynasty is active
+            .filter(|d| !d.is_dead())
+            .count();
+
+        return dynasties_alive < 2
+            || self.steps > MAX_ENVIRONMENT_AGE.unwrap_or(usize::max_value());
+    }
+
+    // Each axis looks like this, when they're added, the result looks like 4 hills
+    // with a valley in the middle.
+    // |
+    // |
+    // |     .           .
+    // |   .   .       .   .
+    // |  .     .     .     .
+    // | .        . .        .
+    // |.                     .
+    // +-----------------------+
+    // 0                       1
+    fn position_based_p_coef(&self, x: usize, y: usize) -> f32 {
+        let fifth = self.size / 5;
+
+        let p_bonus = |pos| {
+            if pos > fifth && pos < 2 * fifth
+                || pos > 3 * fifth && pos < 4 * fifth
+            {
+                1.5
+            } else {
+                0.0
+            }
+        };
+
+        p_bonus(x) + p_bonus(y)
+    }
 }
 
 impl Dynasty {
@@ -215,7 +266,7 @@ impl Cell {
             ttl: ANT_TTL,
             // Arbitrary choice of direction.
             direction: Direction::South,
-            reward: 0.0,
+            reward: Reward::PenaltyForBreathing,
         }
     }
 
@@ -282,20 +333,6 @@ impl Direction {
 //------------------------------- World ticking ------------------------------//
 
 impl Environment {
-    /// Whether we can break the step loop because one dynasty is dominant or
-    /// the environment aged.
-    pub fn is_finished(&self) -> bool {
-        let dynasties_alive = self
-            .dynasties
-            .iter()
-            // Dynasty is active
-            .filter(|d| !d.is_dead())
-            .count();
-
-        return dynasties_alive < 2
-            || self.steps > MAX_ENVIRONMENT_AGE.unwrap_or(usize::max_value());
-    }
-
     pub fn step(&mut self, dynasty_agents: &mut [DynastyAgent]) {
         self.steps += 1;
         // Updates environment.
@@ -322,7 +359,7 @@ impl Environment {
         match &mut self.cells[y][x] {
             Cell::Grass => {
                 let food_spawn_p =
-                    position_based_p_coef(x, y, self.size) * FOOD_SPAWN_P;
+                    self.position_based_p_coef(x, y) * FOOD_SPAWN_P;
                 let should_spawn_food = self.rng.roll_dice(food_spawn_p);
                 if should_spawn_food {
                     // TODO: Make this a distribution.
@@ -434,7 +471,7 @@ impl Environment {
 
         // By default the ant gets a negative reward, also known as penalty for
         // breathing.
-        ant.reward = -1.0;
+        ant.reward = Reward::PenaltyForBreathing;
         if let Some((new_x, new_y)) = ant.direction.new_coords(x, y, self.size)
         {
             debug_assert!(new_y < self.size && new_x < self.size);
@@ -447,7 +484,7 @@ impl Environment {
                 Cell::Food(amount) => {
                     let can_carry = MAX_FOOD_ANT_CAN_CARRY - ant.carries_food;
                     if can_carry != 0 {
-                        ant.reward = 1.0;
+                        ant.reward = Reward::PickUpFood;
 
                         // Takes as much food as the little guy can.
                         if can_carry >= amount {
@@ -458,9 +495,8 @@ impl Environment {
                             self.cells[new_y][new_x] =
                                 Cell::Food(amount - can_carry);
                         }
-
-                        self.cells[y][x] = ant.into();
                     }
+                    self.cells[y][x] = ant.into();
                 }
                 Cell::Ant {
                     direction,
@@ -472,7 +508,7 @@ impl Environment {
                         // If both ants point against each other, they fight.
                         // Otherwise our ant feeds on the one in the target cell.
                         if direction.is_inverse(ant.direction) {
-                            // todo!("Fight!");
+                            self.cells[y][x] = ant.into();
                         } else {
                             let can_carry =
                                 MAX_FOOD_ANT_CAN_CARRY - ant.carries_food;
@@ -481,11 +517,13 @@ impl Environment {
                             } else {
                                 ant.carries_food = MAX_FOOD_ANT_CAN_CARRY;
                             }
-                            ant.reward = 1.0;
+                            ant.reward = Reward::KillEnemy;
                             self.dynasties[dynasty_id as usize].ants -= 1;
                             self.cells[y][x] = Cell::trail(ant.dynasty_id);
                             self.cells[new_y][new_x] = ant.into();
                         }
+                    } else {
+                        self.cells[y][x] = ant.into();
                     }
                 }
                 Cell::Nest(dynasty_id) => {
@@ -500,9 +538,8 @@ impl Environment {
                             self.dynasties[d_i].food += self.dynasties[d_i]
                                 .food
                                 .saturating_add(ant.carries_food);
-                            ant.reward = 10.0;
+                            ant.reward = Reward::BringFoodToNest;
                             ant.carries_food = 0;
-                            self.cells[y][x] = ant.into();
                         }
                     } else if self.dynasties[d_i].food > 0 {
                         let can_carry =
@@ -516,38 +553,44 @@ impl Environment {
                             ant.carries_food = MAX_FOOD_ANT_CAN_CARRY;
                             self.dynasties[d_i].food -= can_carry;
                         }
-                        ant.reward = 3.0;
-                        self.cells[y][x] = ant.into();
+                        ant.reward = Reward::LootEnemyNest;
                     }
+                    self.cells[y][x] = ant.into();
                 }
-                Cell::Wall => (),
+                Cell::Wall => self.cells[y][x] = ant.into(),
             }
         }
     }
-}
 
-// Each axis looks like this, when they're added, the result looks like 4 hills
-// with a valley in the middle.
-// |
-// |
-// |     .           .
-// |   .   .       .   .
-// |  .     .     .     .
-// | .        . .        .
-// |.                     .
-// +-----------------------+
-// 0                       1
-fn position_based_p_coef(x: usize, y: usize, size: usize) -> f32 {
-    let fifth = size / 5;
-
-    let p_bonus = |pos| {
-        if pos > fifth && pos < 2 * fifth || pos > 3 * fifth && pos < 4 * fifth
-        {
-            1.5
-        } else {
-            0.0
+    /// Gives rewards to surviving ants.
+    pub fn reward_winner(self, dynasty_agents: &mut [DynastyAgent]) {
+        for (y, row) in self.cells.into_iter().enumerate() {
+            for (x, cell) in row.into_iter().enumerate() {
+                match cell {
+                    Cell::Ant {
+                        dynasty_id,
+                        carries_food,
+                        direction,
+                        ttl,
+                        ..
+                    } => {
+                        let dynasty_agent =
+                            &mut dynasty_agents[dynasty_id as usize];
+                        dynasty_agent.pick_action(
+                            x,
+                            y,
+                            Ant {
+                                dynasty_id,
+                                carries_food,
+                                reward: Reward::Survivor,
+                                direction,
+                                ttl,
+                            },
+                        );
+                    }
+                    _ => (),
+                }
+            }
         }
-    };
-
-    p_bonus(x) + p_bonus(y)
+    }
 }

@@ -4,44 +4,43 @@ mod ext;
 
 use dynasty::DynastyAgent;
 use environment::Environment;
-use std::time::Instant;
+use std::fs::File;
+use std::io::Write;
 
 // How many cells in a row and in a column.
-const GRID_SIZE: usize = 256;
+const GRID_SIZE: usize = 200;
 
 // How many warring ant dynasties.
 const DYNASTIES: u8 = 5;
 
+const SIMULATED_ENVS: usize = 11;
+
 fn main() {
+    let mut stats = File::create("debug/data.txt").unwrap();
     let mut dynasty_agents: Vec<_> = (0..DYNASTIES)
         .map(|id| DynastyAgent::new(id, GRID_SIZE))
         .collect();
 
-    // Places the game of life 100 times.
-    for env_n in 0..500 {
-        let mut elapsed = 0;
+    for env_n in 0..SIMULATED_ENVS {
         let mut environment = Environment::new(GRID_SIZE, DYNASTIES);
         loop {
-            let now = Instant::now();
             environment.step(&mut dynasty_agents);
-            elapsed += now.elapsed().as_micros();
 
-            if environment.steps % 4000 == 0 {
-                render(env_n, &environment);
+            if env_n % 10 == 0 && environment.steps % 100 == 0 {
+                render_value_function(&environment, &dynasty_agents[0]);
             }
 
             if environment.is_finished() {
-                if environment.steps > 5000 || env_n % 10 == 0 {
+                // debug
+                if environment.steps > 10000 {
                     render(env_n, &environment);
                 }
                 break;
             }
         }
-
-        println!("Env #{}", env_n);
-        println!("Steps: {}", environment.steps);
-        println!("Avg step uqs {}", elapsed / environment.steps as u128);
-        println!();
+        println!("#{} steps: {}", env_n, environment.steps);
+        write!(stats, "{},", environment.steps).unwrap();
+        environment.reward_winner(&mut dynasty_agents);
     }
 }
 
@@ -98,5 +97,44 @@ fn render(env: usize, environment: &Environment) {
 
     image
         .save(format!("debug/e{}-t{}.png", env, environment.steps))
+        .expect("Cannot save image");
+}
+
+fn render_value_function(
+    environment: &Environment,
+    dynasty_agent: &DynastyAgent,
+) {
+    let size = environment.size as u32;
+    let mut image = image::DynamicImage::new_rgb8(size, size);
+    let image_view = image.as_mut_rgb8().unwrap();
+
+    for (y, row) in dynasty_agent.state_values_with_food.iter().enumerate() {
+        for (x, value) in row.iter().enumerate() {
+            let pixel = image_view.get_pixel_mut(x as u32, y as u32);
+            let c = ((value + 10.0).max(0.0) * 20.0).max(255.0) as u8;
+            pixel.0 = [c, c, c];
+        }
+    }
+    image
+        .save(format!(
+            "debug/{}-f-{}-w.png",
+            environment.steps, dynasty_agent.dynasty_id
+        ))
+        .expect("Cannot save image");
+
+    let mut image = image::DynamicImage::new_rgb8(size, size);
+    let image_view = image.as_mut_rgb8().unwrap();
+    for (y, row) in dynasty_agent.state_values_without_food.iter().enumerate() {
+        for (x, value) in row.iter().enumerate() {
+            let pixel = image_view.get_pixel_mut(x as u32, y as u32);
+            let c = ((value + 10.0).max(0.0) * 20.0).min(255.0) as u8;
+            pixel.0 = [c, c, c];
+        }
+    }
+    image
+        .save(format!(
+            "debug/{}-f-{}-n.png",
+            environment.steps, dynasty_agent.dynasty_id
+        ))
         .expect("Cannot save image");
 }

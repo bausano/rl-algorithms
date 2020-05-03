@@ -1,26 +1,28 @@
 //! Includes the RL inspired logic.
-use crate::environment::{Ant, Direction, DynastyId, MAX_FOOD_ANT_CAN_CARRY};
+use crate::environment::{
+    Ant, Direction, DynastyId, Reward, MAX_FOOD_ANT_CAN_CARRY,
+};
 use crate::ext::*;
 use rand::prelude::*;
 
 // Chance to take a random action.
-const EXPLORATION_P: f32 = 0.05;
+const EXPLORATION_P: f32 = 0.1;
 
 // How fast do state values propagate.
-const STEP_SIZE: f32 = 0.2;
+const STEP_SIZE: f32 = 0.25;
 
 // The status or the 3x3 cells and the bool which says whether the ant cannot
 // carry more food.
 type State = Vec<Vec<f32>>;
 
 pub struct DynastyAgent {
-    dynasty_id: DynastyId,
+    pub dynasty_id: DynastyId,
     /// Agent's estimation of how good is it being in certain cell if the ant
     /// carries maximum food.
-    state_values_with_food: State,
+    pub state_values_with_food: State,
     /// Agent's estimation of how good is it being in a certain cell if the
     // ant still can carry more food.
-    state_values_without_food: State,
+    pub state_values_without_food: State,
     // Roll the dice for exploratory moves.
     rng: ThreadRng,
 }
@@ -51,14 +53,21 @@ impl DynastyAgent {
         ant_y: usize,
         ant: Ant,
     ) -> Direction {
-        let state_values = if ant.carries_food == MAX_FOOD_ANT_CAN_CARRY {
+        // If the ant just got the reward, we still want to improve the value in
+        // the `state_values_without_food`.
+        let has_food_for_more_than_one_turn = !(ant.reward
+            == Reward::PickUpFood
+            || ant.reward == Reward::KillEnemy
+            || ant.reward == Reward::LootEnemyNest)
+            && ant.carries_food == MAX_FOOD_ANT_CAN_CARRY;
+        let state_values = if has_food_for_more_than_one_turn {
             &mut self.state_values_with_food
         } else {
             &mut self.state_values_without_food
         };
 
         state_values[ant_y][ant_x] =
-            STEP_SIZE * (ant.reward - state_values[ant_y][ant_x]);
+            STEP_SIZE * (f32::from(ant.reward) - state_values[ant_y][ant_x]);
 
         if self.rng.roll_dice(EXPLORATION_P) {
             return Direction::rand(&mut self.rng);
@@ -105,4 +114,17 @@ fn get_state_value_at(x: isize, y: isize, state: &State) -> Option<f32> {
         .get(y as usize)
         .and_then(|row| row.get(x as usize))
         .map(|x| *x)
+}
+
+impl From<Reward> for f32 {
+    fn from(reward: Reward) -> Self {
+        match reward {
+            Reward::PickUpFood => 4.0,
+            Reward::PenaltyForBreathing => -0.5,
+            Reward::KillEnemy => 3.0,
+            Reward::LootEnemyNest => 10.0,
+            Reward::BringFoodToNest => 15.0,
+            Reward::Survivor => 10.0,
+        }
+    }
 }
