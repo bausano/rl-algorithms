@@ -19,13 +19,13 @@ fn main() {
 
     // TODO: This is here for debug.
     let mut elapsed = 0;
-    let steps: usize = 4000;
+    let steps: usize = 4001;
     for step in 0..steps {
         let now = Instant::now();
         environment.step(&mut dynasty_agents);
         elapsed += now.elapsed().as_micros();
 
-        if step % 1000 == 0 {
+        if step % 2000 == 0 {
             render(step, &environment);
         }
     }
@@ -68,11 +68,12 @@ fn render(t: usize, environment: &Environment) {
         for (x, cell) in row.iter().enumerate() {
             let pixel = image_view.get_pixel_mut(x as u32, y as u32);
             match cell {
+                Cell::Wall => pixel.0 = [0, 0, 0],
                 Cell::Grass => pixel.0 = [255, 255, 255],
                 Cell::Trail { dynasty_id, .. } => {
                     pixel.0 = DYN_TRAIL_COLOURS[*dynasty_id as usize]
                 }
-                Cell::Food(_) => pixel.0 = [32, 32, 32],
+                Cell::Food(_) => pixel.0 = [200, 200, 200],
                 Cell::Nest(dynasty_id) => {
                     pixel.0 = DYN_NEST_COLOURS[*dynasty_id as usize]
                 }

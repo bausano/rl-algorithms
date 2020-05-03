@@ -5,7 +5,7 @@ use rand::prelude::*;
 //--------------------------------- Constants --------------------------------//
 
 // How long before trail goes cold.
-const TRAIL_TTL: u16 = 16;
+const TRAIL_TTL: u16 = 32;
 
 // How likely is it that a new nutrients resource is spawned in a cell. Some
 // cells might have probability based on their position.
@@ -96,17 +96,21 @@ struct Ant {
     carries_food: FoodUnit,
     direction: Direction,
     ttl: u16,
+    // Reward for previous action.
+    reward: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub enum Cell {
     Grass,
+    Wall,
     // TODO: Figure out a way to use `Ant` struct.
     Ant {
         dynasty_id: DynastyId,
         carries_food: FoodUnit,
         direction: Direction,
         ttl: u16,
+        reward: f32,
     },
     /// Where ants have to return with their food. Non related nest is
     /// considered source of food and enemy ants can steal food.
@@ -191,6 +195,7 @@ impl Cell {
             ttl: ANT_TTL,
             // Arbitrary choice of direction.
             direction: Direction::South,
+            reward: 0.0,
         }
     }
 
@@ -209,6 +214,7 @@ impl From<Ant> for Cell {
             dynasty_id: ant.dynasty_id,
             direction: ant.direction,
             ttl: ant.ttl,
+            reward: ant.reward,
         }
     }
 }
@@ -332,11 +338,13 @@ impl Environment {
                 }
                 None
             }
+            Cell::Wall => None,
             Cell::Ant {
                 ttl,
                 direction,
                 dynasty_id,
                 carries_food,
+                reward,
             } => {
                 if *ttl == 0 {
                     self.dynasties[*dynasty_id as usize].ants -= 1;
@@ -352,6 +360,7 @@ impl Environment {
                             direction: *direction,
                             dynasty_id: *dynasty_id,
                             carries_food: *carries_food,
+                            reward: *reward,
                         },
                     })
                 }
@@ -369,14 +378,16 @@ impl Environment {
             mut ant,
         } = ant_move;
         // Let the agent do its magic and spit out an action.
-        ant.direction = dynasty_agent.pick_action(&self.cells);
+        ant.direction =
+            dynasty_agent.pick_action(x, y, ant.reward, &self.cells);
 
         // By default the ant gets a negative reward, also known as penalty for
         // breathing.
-        let mut reward = -1.0;
+        ant.reward = -1.0;
         if let Some((new_x, new_y)) = ant.direction.new_coords(x, y, self.size)
         {
             match self.cells[new_y][new_x] {
+                Cell::Wall => (),
                 // Move ant.
                 Cell::Grass | Cell::Trail { .. } => {
                     self.cells[new_y][new_x] = ant.into();
@@ -401,7 +412,7 @@ impl Environment {
                             } else {
                                 ant.carries_food = MAX_FOOD_ANT_CAN_CARRY;
                             }
-                            reward = 1.0;
+                            ant.reward = 2.0;
                             self.cells[y][x] = Cell::trail(ant.dynasty_id);
                             self.cells[new_y][new_x] = ant.into();
                         }
@@ -410,7 +421,7 @@ impl Environment {
                 Cell::Food(amount) => {
                     // Do we want to reward based on amount of food
                     // picked up?
-                    reward = 1.0;
+                    ant.reward = 1.0;
                     let can_carry = MAX_FOOD_ANT_CAN_CARRY - ant.carries_food;
 
                     // Takes as much food as the little guy can.
@@ -437,7 +448,7 @@ impl Environment {
                             self.dynasties[d_i].food += self.dynasties[d_i]
                                 .food
                                 .saturating_add(ant.carries_food);
-                            reward = 1.0;
+                            ant.reward = 5.0;
                             self.cells[y][x] = ant.into();
                         }
                     } else if self.dynasties[d_i].food > 0 {
@@ -452,13 +463,11 @@ impl Environment {
                             ant.carries_food = MAX_FOOD_ANT_CAN_CARRY;
                             self.dynasties[d_i].food -= can_carry;
                         }
-                        reward = 1.0;
+                        ant.reward = 3.0;
                         self.cells[y][x] = ant.into();
                     }
                 }
             }
         }
-
-        dynasty_agent.reward(reward);
     }
 }
