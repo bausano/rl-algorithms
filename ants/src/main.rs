@@ -13,11 +13,12 @@ const GRID_SIZE: usize = 256;
 const DYNASTIES: u8 = 5;
 
 fn main() {
-    let mut dynasty_agents: Vec<_> =
-        (0..DYNASTIES).map(DynastyAgent::new).collect();
+    let mut dynasty_agents: Vec<_> = (0..DYNASTIES)
+        .map(|id| DynastyAgent::new(id, GRID_SIZE))
+        .collect();
 
     // Places the game of life 100 times.
-    for env_n in 0..10000 {
+    for env_n in 0..500 {
         let mut elapsed = 0;
         let mut environment = Environment::new(GRID_SIZE, DYNASTIES);
         loop {
@@ -30,7 +31,7 @@ fn main() {
             }
 
             if environment.is_finished() {
-                if environment.steps > 5000 {
+                if environment.steps > 5000 || env_n % 10 == 0 {
                     render(env_n, &environment);
                 }
                 break;
