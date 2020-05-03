@@ -1,4 +1,7 @@
 # Ants
+
+**This is a TODO, which doesn't work yet. It's messy.**
+
 "Ants" are an extension of an example given by David Silver in his
 [video lecture][david-silver-videolecture-3]. Two ant dynasties are fighting
 over randomly distributed resources in an environment. Ants get positive reward
@@ -45,6 +48,7 @@ I am hoping this could lead to specializations of ants (i.e. ant #3, #25 and
     radius (because ants have to climb uphill), but in the centre of the circle
     set high probability of food spawn.
 8. When a dynasty dies off, their other dynasty can take over their nest.
+9. Rename "dynasty" to "colony".
 
 
 ![Ants moving according to a random policy](docs/random_policy.png)
