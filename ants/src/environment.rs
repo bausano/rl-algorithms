@@ -5,7 +5,7 @@ use rand::prelude::*;
 //--------------------------------- Constants --------------------------------//
 
 // How long before trail goes cold.
-pub const TRAIL_TTL: u16 = 10;
+pub const TRAIL_TTL: u16 = 150;
 
 // How likely is it that a new nutrients resource is spawned in a cell. Some
 // cells might have probability based on their position.
@@ -24,11 +24,11 @@ pub const ANT_SPAWN_COST: FoodUnit = 50;
 // How many steps does a single ant live. This directly affects how much can a
 // dynasty spread around. If the size of the environment is large, the ants
 // might not have enough time to travel around to get food and come back.
-pub const ANT_TTL: u16 = 1500;
+pub const ANT_TTL: u16 = 2000;
 
 // Initially, how much extra food does a dynasty get. By default it gets at
 // least `ANT_SPAWN_COST`, otherwise it's a foobar.
-pub const INITIAL_DYNASTY_EXTRA_FOOD: FoodUnit = 250;
+pub const INITIAL_DYNASTY_EXTRA_FOOD: FoodUnit = 1000;
 
 // They say ant can cary more than its weight, right?
 pub const MAX_FOOD_ANT_CAN_CARRY: FoodUnit = 300;

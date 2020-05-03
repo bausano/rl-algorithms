@@ -17,7 +17,7 @@ fn main() {
         (0..DYNASTIES).map(DynastyAgent::new).collect();
 
     // Places the game of life 100 times.
-    for env_n in 0..500 {
+    for env_n in 0..10000 {
         let mut elapsed = 0;
         let mut environment = Environment::new(GRID_SIZE, DYNASTIES);
         loop {
@@ -25,11 +25,14 @@ fn main() {
             environment.step(&mut dynasty_agents);
             elapsed += now.elapsed().as_micros();
 
-            if environment.steps * 2 > 4000 && environment.steps % 5 == 0 {
+            if environment.steps % 4000 == 0 {
                 render(env_n, &environment);
             }
 
             if environment.is_finished() {
+                if environment.steps > 5000 {
+                    render(env_n, &environment);
+                }
                 break;
             }
         }
@@ -93,6 +96,6 @@ fn render(env: usize, environment: &Environment) {
     }
 
     image
-        .save(format!("debug/e{}.png", env))
+        .save(format!("debug/e{}-t{}.png", env, environment.steps))
         .expect("Cannot save image");
 }
