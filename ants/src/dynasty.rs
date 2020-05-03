@@ -1,16 +1,20 @@
 //! Includes the RL inspired logic.
-use crate::environment::{Cell, Direction, DynastyId};
+use crate::environment::{
+    Ant, Cell, Direction, DynastyId, FoodUnit, MAX_FOOD_ANT_CAN_CARRY,
+};
 use crate::ext::*;
 use rand::prelude::*;
-use std::collections::HashMap;
+use std::collections::hash_map::{Entry, HashMap};
 
 // Chance to take a random action.
-const EXPLORATION_P: f32 = 0.01;
+const EXPLORATION_P: f32 = 0.1;
 
 // How fast do state values propagate.
 const STEP_SIZE: f32 = 0.2;
 
-type State = [u8; 9];
+// The status or the 3x3 cells and the bool which says whether the ant cannot
+// carry more food.
+type State = (bool, [u8; 9]);
 
 pub struct DynastyAgent {
     dynasty_id: DynastyId,
@@ -36,23 +40,25 @@ impl DynastyAgent {
         &mut self,
         ant_x: usize,
         ant_y: usize,
-        reward: f32,
+        ant: Ant,
         cells: &[Vec<Cell>],
     ) -> Direction {
         let current_state = get_state_at(
             self.dynasty_id,
+            ant.carries_food,
             cells,
             ant_x as isize,
             ant_y as isize,
         );
-        let current_state_value = {
-            // Get the value of the current state.
-            let current_state_value =
-                self.state_values.entry(current_state).or_insert(0.5);
-
-            // Updates the current state value by the reward function.
-            *current_state_value += STEP_SIZE * (reward - *current_state_value);
-            *current_state_value
+        // Get the value of the current state.
+        let current_state_value = match self.state_values.entry(current_state) {
+            Entry::Occupied(mut v) => {
+                let current_state_value = v.get_mut();
+                *current_state_value +=
+                    STEP_SIZE * (ant.reward - *current_state_value);
+                *current_state_value
+            }
+            Entry::Vacant(v) => *v.insert(ant.reward),
         };
 
         if self.rng.roll_dice(EXPLORATION_P) {
@@ -68,17 +74,20 @@ impl DynastyAgent {
         ];
 
         let mut best_action_value = 0.0;
-        // Arbitrary first action.
-        let mut best_action = Direction::North;
+        let mut best_action = None;
 
         // Finds the best action to take.
         for (direction, (x, y)) in actions {
-            let state = get_state_at(self.dynasty_id, cells, *x, *y);
-            let action_value = *self.state_values.entry(state).or_insert(0.5);
+            let state =
+                get_state_at(self.dynasty_id, ant.carries_food, cells, *x, *y);
+            let action_value = match self.state_values.entry(state) {
+                Entry::Occupied(v) => *v.get(),
+                Entry::Vacant(v) => *v.insert(self.rng.gen_range(0.0, 5.0)),
+            };
 
-            if action_value > best_action_value {
+            if best_action.is_none() || action_value > best_action_value {
                 best_action_value = action_value;
-                best_action = *direction;
+                best_action = Some(*direction);
             }
         }
 
@@ -88,7 +97,7 @@ impl DynastyAgent {
             STEP_SIZE * (best_action_value - current_state_value),
         );
 
-        best_action
+        best_action.unwrap()
     }
 }
 
@@ -121,6 +130,7 @@ impl Cell {
 // Returns 3x3 view into the environment with center at given coordinates.
 fn get_state_at(
     dynasty_id: DynastyId,
+    ant_food: FoodUnit,
     cells: &[Vec<Cell>],
     around_x: isize,
     around_y: isize,
@@ -139,10 +149,11 @@ fn get_state_at(
         }
     };
 
-    let mut state = State::default();
+    let mut state: State =
+        (ant_food == MAX_FOOD_ANT_CAN_CARRY, Default::default());
     for y in 0..3 {
         for x in 0..3 {
-            state[(x + y * 3) as usize] =
+            state.1[(x + y * 3) as usize] =
                 cell_value(around_x - 1 + x, around_y - 1 + y);
         }
     }

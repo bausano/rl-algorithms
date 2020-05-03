@@ -15,28 +15,36 @@ const DYNASTIES: u8 = 5;
 fn main() {
     let mut dynasty_agents: Vec<_> =
         (0..DYNASTIES).map(DynastyAgent::new).collect();
-    let mut environment = Environment::new(GRID_SIZE, DYNASTIES);
 
-    // TODO: This is here for debug.
-    let mut elapsed = 0;
-    let steps: usize = 4001;
-    for step in 0..steps {
-        let now = Instant::now();
-        environment.step(&mut dynasty_agents);
-        elapsed += now.elapsed().as_micros();
+    // Places the game of life 100 times.
+    for env_n in 0..500 {
+        let mut elapsed = 0;
+        let mut environment = Environment::new(GRID_SIZE, DYNASTIES);
+        loop {
+            let now = Instant::now();
+            environment.step(&mut dynasty_agents);
+            elapsed += now.elapsed().as_micros();
 
-        if step % 2000 == 0 {
-            render(step, &environment);
+            if environment.steps * 2 > 4000 && environment.steps % 5 == 0 {
+                render(env_n, &environment);
+            }
+
+            if environment.is_finished() {
+                break;
+            }
         }
+
+        println!("Env #{}", env_n);
+        println!("Steps: {}", environment.steps);
+        println!("Avg step uqs {}", elapsed / environment.steps as u128);
+        println!();
     }
-    println!("avg uqs {}", elapsed / steps as u128);
-    println!("Dynasties: {:?}", environment.dynasties);
 }
 
 // TODO: For debug now.
 // https://color.adobe.com/create
 // https://www.rapidtables.com/convert/color/hex-to-rgb.html
-fn render(t: usize, environment: &Environment) {
+fn render(env: usize, environment: &Environment) {
     use environment::Cell;
     const DYN_NEST_COLOURS: &[[u8; 3]] = &[
         [139, 0, 0],
@@ -85,6 +93,6 @@ fn render(t: usize, environment: &Environment) {
     }
 
     image
-        .save(format!("d{}-t{}.png", env!("CARGO_PKG_VERSION"), t))
+        .save(format!("debug/e{}.png", env))
         .expect("Cannot save image");
 }
